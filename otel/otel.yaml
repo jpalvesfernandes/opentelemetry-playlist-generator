@@ -1,0 +1,80 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+
+  tail_sampling:
+    decision_wait: 30s # The time to wait for a decision to be made.
+    policies: [
+        {
+          name: sample-erroring-traces, # Name of the policy.
+          type: status_code, # The type must match the type of policy to be used.
+          status_code: { status_codes: [ERROR] }, # Only sample traces which have a span containing an error.
+        },
+        {
+          name: sample-long-traces, # Name of the policy.
+          type: latency, # The type must match the type of policy to be used.
+          latency: { threshold_ms: 200 }, # Only sample traces which are longer than 200ms in duration.
+        },
+      ]
+
+connectors:
+  spanmetrics:
+    namespace: traces.spanmetrics
+    histogram:
+      explicit:
+    dimensions:
+      - name: http.method
+      - name: http.target
+      - name: http.status_code
+      - name: service.version
+    exemplars:
+      enabled: true
+
+  servicegraph:
+    metrics_exporter: prometheusremotewrite
+    store: # Configuration for the in-memory store.
+      ttl: 2s # Time to wait for an edge to be completed.
+      max_items: 200 # Number of edges that will be stored in the storeMap.
+    cache_loop: 2m # The timeout used to clean the cache periodically.
+    store_expiration_loop: 10s # The timeout used to expire old entries from the store periodically.
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  prometheusremotewrite:
+    endpoint: http://mimir:9009/api/v1/push
+    tls:
+      insecure: true
+
+  otlphttp/loki:
+    endpoint: "http://loki:3100/otlp"
+    tls:
+      insecure: true
+  logging:
+
+service:
+  # telemetry:
+  #   logs:
+  #     level: "debug"
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [otlp/tempo]
+
+    metrics:
+      receivers: [otlp]
+      exporters: [prometheusremotewrite]
+
+    logs:
+      receivers: [otlp]
+      exporters: [otlphttp/loki]

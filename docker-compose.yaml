@@ -1,0 +1,96 @@
+version: "3"
+volumes:
+  grafana:
+services:
+  gateway:
+    ports:
+      - "8080:8080"
+    build:
+      context: .
+      dockerfile: cmd/gateway/Dockerfile
+    environment:
+      - SPOTIFY_ID=${SPOTIFY_ID}
+      - SPOTIFY_SECRET=${SPOTIFY_SECRET}
+      - OTEL_EXPORTER_OTLP_ENDPOINT
+      - OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
+
+  song-matcher:
+    build:
+      context: .
+      dockerfile: cmd/song-matcher/Dockerfile
+    environment:
+      - SPOTIFY_ID=${SPOTIFY_ID}
+      - SPOTIFY_SECRET=${SPOTIFY_SECRET}
+      - OTEL_EXPORTER_OTLP_ENDPOINT
+      - OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
+
+  playlist-creator:
+    build:
+      context: .
+      dockerfile: cmd/playlist-creator/Dockerfile
+    environment:
+      - SPOTIFY_ID=${SPOTIFY_ID}
+      - SPOTIFY_SECRET=${SPOTIFY_SECRET}
+      - OTEL_EXPORTER_OTLP_ENDPOINT
+      - OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
+
+  opentelemetry-collector:
+    image: otel/opentelemetry-collector-contrib
+    ports:
+      - "12347:12345"
+      - "12348:12348"
+      - "6832:6832"
+      - "55679:55679"
+    volumes:
+      - ./otel/otel.yaml:/etc/otel-collector-config.yml
+    command: ["--config=/etc/otel-collector-config.yml"]
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    volumes:
+      - "./otel/grafana/definitions:/var/lib/grafana/dashboards"
+      - "./otel/grafana/provisioning:/etc/grafana/provisioning"
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_FEATURE_TOGGLES_ENABLE=flameGraph traceqlSearch correlations traceQLStreaming metricsSummary traceqlEditor traceToMetrics traceToProfiles datatrails
+      - GF_INSTALL_PLUGINS=https://storage.googleapis.com/integration-artifacts/grafana-lokiexplore-app/grafana-lokiexplore-app-latest.zip;grafana-lokiexplore-app
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    logging:
+      driver: none
+
+  tempo:
+    image: grafana/tempo:2.4.1
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+      - "55680:55680"
+      - "55681:55681"
+      - "14250:14250"
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - "./otel/tempo.yaml:/etc/tempo.yaml"
+    logging:
+      driver: none
+
+  loki:
+    image: grafana/loki:3.0.0
+    command: ["--pattern-ingester.enabled=true", "-config.file=/etc/loki/loki.yaml"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - "./otel/loki.yaml:/etc/loki/loki.yaml"
+    logging:
+      driver: none
+
+  mimir:
+    image: grafana/mimir:2.12.0
+    command: ["-ingester.native-histograms-ingestion-enabled=true", "-config.file=/etc/mimir.yaml"]
+    ports:
+      - "9009:9009"
+    volumes:
+      - "./otel/mimir.yaml:/etc/mimir.yaml"
+    logging:
+      driver: none
